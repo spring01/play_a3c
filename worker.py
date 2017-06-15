@@ -1,5 +1,6 @@
 
 import sys
+import pickle
 import gym
 import numpy as np
 import tensorflow as tf
@@ -24,6 +25,7 @@ def main():
 
     env = gym.make('Breakout-v0')
     env = PPSSWrapper(env)
+
     input_shape = env.observation_space.shape
     num_actions = env.action_space.n
 
@@ -46,6 +48,7 @@ def main():
         value = Dense(1)(hid)
         policy_logits = Dense(num_actions)(hid)
         model_global = keras.models.Model(inputs=input_h, outputs=[value, policy_logits])
+        step_global = tf.Variable(0)
 
     with tf.device(worker_dev):
         input_h = keras.layers.Input(shape=input_shape)
@@ -62,12 +65,6 @@ def main():
         value = Dense(1)(hid)
         policy_logits = Dense(num_actions)(hid)
         model_local = keras.models.Model(inputs=input_h, outputs=[value, policy_logits])
-
-        #~ inp = tf.placeholder(tf.float32, shape=(None, 100))
-        #~ out = tf.matmul(inp, weights)
-        #~ target = tf.placeholder(tf.float32, shape=(None, 50))
-        #~ loss = tf.nn.l2_loss(target - out)
-        #~ train_op = tf.train.AdamOptimizer(0.0).minimize(loss)
 
     global_weights = model_global.weights
     local_weights = model_local.weights
@@ -94,14 +91,20 @@ def main():
     grad_local = tf.gradients(loss, local_weights)
     grad_local, _ = tf.clip_by_global_norm(grad_local, 40.0)
     grads_and_vars = list(zip(grad_local, global_weights))
-    train_op = opt.apply_gradients(grads_and_vars)
 
-    # do not call any Keras model.XXX methods from now on
+    inc_step = step_global.assign_add(tf.shape(state_h)[0])
+    train_op = tf.group(opt.apply_gradients(grads_and_vars), inc_step)
 
     with tf.Session('grpc://localhost:{}'.format(port)) as sess:
         init_global = tf.global_variables_initializer()
         sess.run(init_global)
+
+        step = sess.run(step_global)
+        with open('save{}.p'.format(step), 'wb') as pic:
+            pickle.dump(sess.run(global_weights), pic)
+
         state = env.reset()
+        last_step = sess.run(step_global)
         while True:
             sess.run(sync_local)
             state_history = [state]
@@ -109,7 +112,12 @@ def main():
             reward_history = []
             for t in range(5):
                 action_onehot = sess.run(policy_action, feed_dict={state_h: [state]})[0]
+                #~ print(action_onehot)
                 state, reward, done, info = env.step(action_onehot.argmax())
+                if reward > 0.0:
+                    reward = 1.0
+                elif reward < 0.0:
+                    reward = -1.0
                 state_history.append(state)
                 action_history.append(action_onehot)
                 reward_history.append(reward)
@@ -119,7 +127,7 @@ def main():
             batch_state = np.stack(state_history)
             batch_action = np.stack(action_history)
             batch_value = sess.run(value, feed_dict={state_h: batch_state})
-            reward_long = 0 if done else batch_value[-1]
+            reward_long = 0.0 if done else batch_value[-1]
             reward_long_list = []
             for reward in reversed(reward_history):
                 reward_long = reward + 0.99 * reward_long
@@ -131,7 +139,16 @@ def main():
                                                    advantage_h: batch_adv,
                                                    reward_h: batch_reward,
                                                    action_h: batch_action})
-            print(sess.run(global_weights[-2]))
+            #~ print(sess.run(global_weights[-2]))
+            if task_index == 0:
+                step = sess.run(step_global)
+                if step - last_step > 10000:
+                    save_weights = sess.run(global_weights)
+                    with open('save{}.p'.format(step), 'wb') as pic:
+                        pickle.dump(save_weights, pic)
+                    print(save_weights[-2])
+                    last_step = step
+                print(step)
 
 
 if __name__ == "__main__":
