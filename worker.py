@@ -66,34 +66,34 @@ def main():
         policy_logits = Dense(num_actions)(hid)
         model_local = keras.models.Model(inputs=input_h, outputs=[value, policy_logits])
 
-    global_weights = model_global.weights
-    local_weights = model_local.weights
-    sync_local = tf.group(*[vl.assign(vg) for vg, vl in zip(global_weights, local_weights)])
-    value, policy_logits = model_local.outputs
-    value = value[:, 0]
-    log_policy_prob = tf.nn.log_softmax(policy_logits)
-    policy_prob = tf.nn.softmax(policy_logits)
+        global_weights = model_global.weights
+        local_weights = model_local.weights
+        sync_local = tf.group(*[vl.assign(vg) for vg, vl in zip(global_weights, local_weights)])
+        value, policy_logits = model_local.outputs
+        value = value[:, 0]
+        log_policy_prob = tf.nn.log_softmax(policy_logits)
+        policy_prob = tf.nn.softmax(policy_logits)
 
-    policy_action = tf.squeeze(tf.multinomial(policy_logits - tf.reduce_max(policy_logits, [1], keep_dims=True), 1), [1])
-    policy_action = tf.one_hot(policy_action, num_actions)
+        policy_action = tf.squeeze(tf.multinomial(policy_logits - tf.reduce_max(policy_logits, [1], keep_dims=True), 1), [1])
+        policy_action = tf.one_hot(policy_action, num_actions)
 
-    state_h = model_local.inputs[0]
-    advantage_h = tf.placeholder(tf.float32, [None])
-    reward_h = tf.placeholder(tf.float32, [None])
-    action_h = tf.placeholder(tf.float32, [None, num_actions])
+        state_h = model_local.inputs[0]
+        advantage_h = tf.placeholder(tf.float32, [None])
+        reward_h = tf.placeholder(tf.float32, [None])
+        action_h = tf.placeholder(tf.float32, [None, num_actions])
 
-    policy_loss = -tf.reduce_sum(tf.reduce_sum(log_policy_prob * action_h, [1]) * advantage_h)
-    value_loss = 0.5 * tf.reduce_sum(tf.square(value - reward_h))
-    entropy = -tf.reduce_sum(policy_prob * log_policy_prob)
-    loss = policy_loss + 0.5 * value_loss - entropy * 0.01
+        policy_loss = -tf.reduce_sum(tf.reduce_sum(log_policy_prob * action_h, [1]) * advantage_h)
+        value_loss = 0.5 * tf.reduce_sum(tf.square(value - reward_h))
+        entropy = -tf.reduce_sum(policy_prob * log_policy_prob)
+        loss = policy_loss + 0.5 * value_loss - entropy * 0.01
 
-    opt = tf.train.AdamOptimizer(1e-4)
-    grad_local = tf.gradients(loss, local_weights)
-    grad_local, _ = tf.clip_by_global_norm(grad_local, 40.0)
-    grads_and_vars = list(zip(grad_local, global_weights))
+        opt = tf.train.AdamOptimizer(1e-4)
+        grad_local = tf.gradients(loss, local_weights)
+        grad_local, _ = tf.clip_by_global_norm(grad_local, 40.0)
+        grads_and_vars = list(zip(grad_local, global_weights))
 
-    inc_step = step_global.assign_add(tf.shape(state_h)[0])
-    train_op = tf.group(opt.apply_gradients(grads_and_vars), inc_step)
+        inc_step = step_global.assign_add(tf.shape(state_h)[0])
+        train_op = tf.group(opt.apply_gradients(grads_and_vars), inc_step)
 
     with tf.Session('grpc://localhost:{}'.format(port)) as sess:
         init_global = tf.global_variables_initializer()
