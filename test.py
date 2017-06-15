@@ -12,7 +12,7 @@ try:
     while True:
         time.sleep(1)
 finally:
-    print(time.time() - start)
+    print('elapsed', time.time() - start)
     for worker in worker_list:
         worker.terminate()
 

@@ -100,11 +100,12 @@ def main():
         sess.run(init_global)
 
         step = sess.run(step_global)
-        with open('save{}.p'.format(step), 'wb') as pic:
-            pickle.dump(sess.run(global_weights), pic)
+        if task_index == 0:
+            with open('save{}.p'.format(step), 'wb') as pic:
+                pickle.dump(sess.run(global_weights), pic)
 
         state = env.reset()
-        last_step = sess.run(step_global)
+        last_step = step
         while True:
             sess.run(sync_local)
             state_history = [state]
@@ -112,7 +113,6 @@ def main():
             reward_history = []
             for t in range(5):
                 action_onehot = sess.run(policy_action, feed_dict={state_h: [state]})[0]
-                #~ print(action_onehot)
                 state, reward, done, info = env.step(action_onehot.argmax())
                 if reward > 0.0:
                     reward = 1.0
@@ -135,18 +135,15 @@ def main():
             batch_reward = np.stack(reversed(reward_long_list))
 
             batch_adv = batch_reward - batch_value[:-1]
-            result = sess.run(train_op, feed_dict={state_h: batch_state[:-1],
-                                                   advantage_h: batch_adv,
-                                                   reward_h: batch_reward,
-                                                   action_h: batch_action})
-            #~ print(sess.run(global_weights[-2]))
+            feed_dict={state_h: batch_state[:-1], advantage_h: batch_adv,
+                       reward_h: batch_reward, action_h: batch_action}
+            sess.run(train_op, feed_dict)
             if task_index == 0:
                 step = sess.run(step_global)
                 if step - last_step > 10000:
                     save_weights = sess.run(global_weights)
                     with open('save{}.p'.format(step), 'wb') as pic:
                         pickle.dump(save_weights, pic)
-                    print(save_weights[-2])
                     last_step = step
                 print(step)
 

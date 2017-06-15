@@ -42,12 +42,9 @@ def main():
     with open(sys.argv[1], 'rb') as save:
         weights = pickle.load(save)
 
-    model_weights = model.weights
-    assignments = tf.group(*[mw.assign(w) for mw, w in zip(model_weights, weights)])
+    assignments = tf.group(*[mw.assign(w) for mw, w in zip(model.weights, weights)])
     sess.run(assignments)
 
-    print(weights[-2])
-    print(sess.run(model.weights[-2]))
     all_total_rewards = []
     for _ in range(20):
         state = env.reset()
@@ -55,7 +52,6 @@ def main():
         total_rewards = 0.0
         for i in range(100000):
             action_onehot = sess.run(policy_action, feed_dict={state_h: [state]})[0]
-            #~ print(action_onehot)
             state, reward, done, info = env.step(action_onehot.argmax())
             env.unwrapped.render()
             total_rewards += reward
